@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2017-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-07-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/hashicorp/errwrap"
 	"github.com/hashicorp/vault/sdk/framework"
@@ -200,7 +200,11 @@ func (b *azureAuthBackend) verifyClaims(claims *additionalClaims, role *azureRol
 
 func (b *azureAuthBackend) verifyResource(ctx context.Context, subscriptionID, resourceGroupName, vmName string, vmssName string, claims *additionalClaims, role *azureRole) error {
 	// If not checking anything with the resource id, exit early
-	if len(role.BoundResourceGroups) == 0 && len(role.BoundSubscriptionsIDs) == 0 && len(role.BoundLocations) == 0 && len(role.BoundScaleSets) == 0 {
+	if len(role.BoundResourceGroups) == 0 &&
+		len(role.BoundSubscriptionsIDs) == 0 &&
+		len(role.BoundLocations) == 0 &&
+		len(role.BoundScaleSets) == 0 &&
+		len(role.BoundUserAssignedIdentities) == 0 {
 		return nil
 	}
 
@@ -209,7 +213,7 @@ func (b *azureAuthBackend) verifyResource(ctx context.Context, subscriptionID, r
 	}
 
 	var principalID, location *string
-
+	var userAssignedIdentitiesPaths, userAssignedIdentitiesPrincipalIds []string
 	switch {
 	// If vmss name is specified, the vm name will be ignored and only the scale set
 	// will be verified since vm names are generated automatically for scale sets
@@ -227,8 +231,20 @@ func (b *azureAuthBackend) verifyResource(ctx context.Context, subscriptionID, r
 		if vmss.Identity == nil {
 			return errors.New("vmss client did not return identity information")
 		}
-		if vmss.Identity.PrincipalID == nil {
-			return errors.New("vmss principal id is empty")
+
+		if vmss.Identity.UserAssignedIdentities != nil {
+			for i, identity := range vmss.Identity.UserAssignedIdentities {
+				userAssignedIdentitiesPaths = append(userAssignedIdentitiesPaths, i)
+				userAssignedIdentitiesPrincipalIds = append(userAssignedIdentitiesPrincipalIds, *identity.PrincipalID)
+			}
+		}
+
+		if vmss.Identity.PrincipalID != nil {
+			principalID = vmss.Identity.PrincipalID
+		}
+
+		if len(userAssignedIdentitiesPaths) == 0 && principalID == nil {
+			return errors.New("vmss principal id or vmss user assigned identities are empty")
 		}
 
 		// Check bound scale sets
@@ -236,7 +252,6 @@ func (b *azureAuthBackend) verifyResource(ctx context.Context, subscriptionID, r
 			return errors.New("scale set not authorized")
 		}
 
-		principalID = vmss.Identity.PrincipalID
 		location = vmss.Location
 
 	case vmName != "":
@@ -254,8 +269,19 @@ func (b *azureAuthBackend) verifyResource(ctx context.Context, subscriptionID, r
 			return errors.New("vm client did not return identity information")
 		}
 
-		if vm.Identity.PrincipalID == nil {
-			return errors.New("vm principal id is empty")
+		if vm.Identity.UserAssignedIdentities != nil {
+			for i, identity := range vm.Identity.UserAssignedIdentities {
+				userAssignedIdentitiesPaths = append(userAssignedIdentitiesPaths, i)
+				userAssignedIdentitiesPrincipalIds = append(userAssignedIdentitiesPrincipalIds, *identity.PrincipalID)
+			}
+		}
+
+		if vm.Identity.PrincipalID != nil {
+			principalID = vm.Identity.PrincipalID
+		}
+
+		if len(userAssignedIdentitiesPaths) == 0 && principalID == nil {
+			return errors.New("vmss principal id or vmss user assigned identities are empty")
 		}
 
 		// Check bound scale sets
@@ -263,7 +289,6 @@ func (b *azureAuthBackend) verifyResource(ctx context.Context, subscriptionID, r
 			return errors.New("bound scale set defined but this vm isn't in a scale set")
 		}
 
-		principalID = vm.Identity.PrincipalID
 		location = vm.Location
 
 	default:
@@ -271,8 +296,12 @@ func (b *azureAuthBackend) verifyResource(ctx context.Context, subscriptionID, r
 	}
 
 	// Ensure the principal id for the VM matches the verified token OID
-	if to.String(principalID) != claims.ObjectID {
-		return errors.New("token object id does not match virtual machine principal id")
+	if to.String(principalID) != claims.ObjectID && !strListContains(userAssignedIdentitiesPrincipalIds, claims.ObjectID) {
+		return errors.New("token object id does not match virtual machine principal id or one of the associated user assigned principal ids")
+	}
+
+	if len(role.BoundUserAssignedIdentities) > 0 && !strListListContains(role.BoundUserAssignedIdentities, userAssignedIdentitiesPaths) {
+		return errors.New("user assigned identities are not authorized")
 	}
 
 	// Check bound subscriptions

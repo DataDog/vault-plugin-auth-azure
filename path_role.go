@@ -127,12 +127,13 @@ type azureRole struct {
 	Period time.Duration `json:"period"`
 
 	// Role binding properties
-	BoundServicePrincipalIDs []string `json:"bound_service_principal_ids"`
-	BoundGroupIDs            []string `json:"bound_group_ids"`
-	BoundResourceGroups      []string `json:"bound_resource_groups"`
-	BoundSubscriptionsIDs    []string `json:"bound_subscription_ids"`
-	BoundLocations           []string `json:"bound_locations"`
-	BoundScaleSets           []string `json:"bound_scale_sets"`
+	BoundServicePrincipalIDs    []string `json:"bound_service_principal_ids"`
+	BoundGroupIDs               []string `json:"bound_group_ids"`
+	BoundResourceGroups         []string `json:"bound_resource_groups"`
+	BoundSubscriptionsIDs       []string `json:"bound_subscription_ids"`
+	BoundLocations              []string `json:"bound_locations"`
+	BoundScaleSets              []string `json:"bound_scale_sets"`
+	BoundUserAssignedIdentities []string `json:"bound_user_assigned_identities"`
 }
 
 // role takes a storage backend and the name and returns the role's storage
@@ -204,12 +205,13 @@ func (b *azureAuthBackend) pathRoleRead(ctx context.Context, req *logical.Reques
 	}
 
 	d := map[string]interface{}{
-		"bound_service_principal_ids": role.BoundServicePrincipalIDs,
-		"bound_group_ids":             role.BoundGroupIDs,
-		"bound_subscription_ids":      role.BoundSubscriptionsIDs,
-		"bound_resource_groups":       role.BoundResourceGroups,
-		"bound_locations":             role.BoundLocations,
-		"bound_scale_sets":            role.BoundScaleSets,
+		"bound_service_principal_ids":    role.BoundServicePrincipalIDs,
+		"bound_group_ids":                role.BoundGroupIDs,
+		"bound_subscription_ids":         role.BoundSubscriptionsIDs,
+		"bound_resource_groups":          role.BoundResourceGroups,
+		"bound_locations":                role.BoundLocations,
+		"bound_scale_sets":               role.BoundScaleSets,
+		"bound_user_assigned_identities": role.BoundUserAssignedIdentities,
 	}
 
 	role.PopulateTokenData(d)
@@ -331,12 +333,17 @@ func (b *azureAuthBackend) pathRoleCreateUpdate(ctx context.Context, req *logica
 		role.BoundScaleSets = boundScaleSets.([]string)
 	}
 
+	if boundUserAssignedIdentities, ok := data.GetOk("bound_user_assigned_identities"); ok {
+		role.BoundUserAssignedIdentities = boundUserAssignedIdentities.([]string)
+	}
+
 	if len(role.BoundServicePrincipalIDs) == 0 &&
 		len(role.BoundGroupIDs) == 0 &&
 		len(role.BoundSubscriptionsIDs) == 0 &&
 		len(role.BoundResourceGroups) == 0 &&
 		len(role.BoundLocations) == 0 &&
-		len(role.BoundScaleSets) == 0 {
+		len(role.BoundScaleSets) == 0 &&
+		len(role.BoundUserAssignedIdentities) == 0 {
 		return logical.ErrorResponse("must have at least one bound constraint when creating/updating a role"), nil
 	}
 
