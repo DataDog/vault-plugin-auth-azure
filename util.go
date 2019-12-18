@@ -46,6 +46,28 @@ func strListContains(haystack []string, needle string) bool {
 	return false
 }
 
+// strListListContains does a case-insensitive search of the string
+// list for the list
+func strListListContains(haystack []string, needle []string) bool {
+	for _, item := range haystack {
+		if strListContains(needle, item) {
+			return true
+		}
+	}
+	return false
+}
+
+// strMapListContains does a case-insensitive search of the string
+// list for the list
+func strMapListContains(haystack []string, needle map[string]interface{}) bool {
+	for key := range needle {
+		if strListContains(haystack, key) {
+			return true
+		}
+	}
+	return false
+}
+
 // userAgent determines the User Agent to send on HTTP requests. This is mostly copied
 // from the useragent helper in vault and may get replaced with something more general
 // for plugins
